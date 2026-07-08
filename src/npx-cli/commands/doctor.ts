@@ -11,7 +11,14 @@ import { styleText } from 'node:util';
 import { isPluginInstalled, marketplaceDirectory, readPluginVersion } from '../utils/paths.js';
 import { getBunVersion, getUvVersion, isInstallCurrent } from '../install/setup-runtime.js';
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
-import { resolveDataDir } from '../../shared/paths.js';
+import { resolveDataDir, DB_PATH } from '../../shared/paths.js';
+import { SessionStore } from '../../services/sqlite/SessionStore.js';
+import {
+  fixSecretsInDatabase,
+  printSecretFixReport,
+  printSecretScanReport,
+  scanSecretsInDatabase,
+} from './scan-secrets.js';
 
 type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -44,7 +51,61 @@ async function probeWorkerHealth(workerHost: string, workerPort: string): Promis
   return { status: 'warn', detail: `reachable but unhealthy (HTTP ${res.status}) at ${workerUrl}` };
 }
 
-export async function runDoctorCommand(): Promise<void> {
+async function runSecretScanMode(args: string[]): Promise<void> {
+  const scanSecrets = args.includes('--scan-secrets');
+  const fix = args.includes('--fix');
+
+  if (!scanSecrets && !fix) {
+    return;
+  }
+
+  const dbPath = DB_PATH;
+  if (!existsSync(dbPath)) {
+    console.error(styleText('red', `Database not found: ${dbPath}`));
+    process.exit(1);
+  }
+
+  const store = new SessionStore(dbPath);
+  try {
+    const scan = scanSecretsInDatabase(store);
+    if (scanSecrets) {
+      printSecretScanReport(scan, dbPath);
+    }
+
+    if (fix) {
+      if (scan.totalHits === 0) {
+        console.log(styleText('green', '\nNo secret-shaped content to fix.'));
+        process.exit(0);
+      }
+      const fixResult = await fixSecretsInDatabase(store);
+      printSecretFixReport(fixResult);
+      if (fixResult.chromaErrors.length > 0) {
+        console.log(
+          styleText(
+            'yellow',
+            '\nRows were redacted in SQLite; some Chroma re-sync steps reported warnings.'
+          )
+        );
+      } else {
+        console.log(styleText('green', '\nRedaction and Chroma re-sync complete.'));
+      }
+      process.exit(0);
+    }
+
+    process.exit(scan.totalHits === 0 ? 0 : 1);
+  } finally {
+    store.close();
+  }
+}
+
+export async function runDoctorCommand(args: string[] = []): Promise<void> {
+  const scanSecrets = args.includes('--scan-secrets');
+  const fix = args.includes('--fix');
+  if (scanSecrets || fix) {
+    await runSecretScanMode(args);
+    return;
+  }
+
   const checks: CheckResult[] = [];
   const dataDir = resolveDataDir();
 

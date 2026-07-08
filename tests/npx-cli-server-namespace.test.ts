@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const indexSource = readFileSync(join(__dirname, '..', 'src', 'npx-cli', 'index.ts'), 'utf-8');
+const doctorSource = readFileSync(join(__dirname, '..', 'src', 'npx-cli', 'commands', 'doctor.ts'), 'utf-8');
 const serverSource = readFileSync(join(__dirname, '..', 'src', 'npx-cli', 'commands', 'server.ts'), 'utf-8');
 const workerServiceSource = readFileSync(join(__dirname, '..', 'src', 'services', 'worker-service.ts'), 'utf-8');
 
@@ -21,6 +22,15 @@ describe('npx CLI server namespace', () => {
     expect(serverSource).toContain('runStopCommand()');
     expect(serverSource).toContain('runRestartCommand()');
     expect(serverSource).toContain('runStatusCommand()');
+  });
+
+  it('routes doctor with sub-args at the top level, not under the server namespace', () => {
+    expect(indexSource).toContain("case 'doctor'");
+    expect(indexSource).toContain('await runDoctorCommand(args.slice(1))');
+    expect(doctorSource).toContain('--scan-secrets');
+    expect(doctorSource).toContain('--fix');
+    expect(serverSource).not.toContain("'doctor'");
+    expect(serverSource).not.toContain('--scan-secrets');
   });
 
   it('routes server lifecycle commands and falls through to a nonzero failure for unknown commands', () => {

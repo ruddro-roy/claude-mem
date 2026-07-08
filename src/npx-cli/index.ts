@@ -40,6 +40,8 @@ ${styleText('bold', 'Runtime Commands')} (requires Bun, delegates to installed p
   ${styleText('cyan', 'npx claude-mem restart')}              Restart worker service
   ${styleText('cyan', 'npx claude-mem status')}               Show worker status
   ${styleText('cyan', 'npx claude-mem doctor')}               Diagnose install/runtime health (bun, uv, worker)
+  ${styleText('cyan', 'npx claude-mem doctor --scan-secrets')} Scan memory DB for secret-shaped content
+  ${styleText('cyan', 'npx claude-mem doctor --scan-secrets --fix')} Redact secrets in DB and re-sync Chroma
   ${styleText('cyan', 'npx claude-mem telemetry status|enable|disable')}   Manage anonymous telemetry (on by default, opt-out)
   ${styleText('cyan', 'npx claude-mem server start')}         Start server service
   ${styleText('cyan', 'npx claude-mem server stop')}          Stop server service
@@ -164,7 +166,7 @@ async function main(): Promise<void> {
 
     case 'doctor': {
       const { runDoctorCommand } = await import('./commands/doctor.js');
-      await runDoctorCommand();
+      await runDoctorCommand(args.slice(1));
       break;
     }
 

@@ -372,6 +372,49 @@ export class ChromaSync {
     return written;
   }
 
+  /**
+   * Re-index a single observation row from SQLite after in-place content edits
+   * (e.g. doctor --scan-secrets --fix). Uses delete+add reconcile in addDocuments.
+   */
+  async resyncObservationById(db: SessionStore, observationId: number): Promise<number> {
+    const obs = db.db.prepare(`
+      SELECT
+        o.*,
+        COALESCE(NULLIF(s.platform_source, ''), 'claude') as platform_source
+      FROM observations o
+      LEFT JOIN sdk_sessions s ON s.memory_session_id = o.memory_session_id
+      WHERE o.id = ?
+    `).get(observationId) as StoredObservation | null;
+
+    if (!obs) {
+      return 0;
+    }
+
+    const documents = this.formatObservationDocs(obs);
+    return this.addDocuments(documents);
+  }
+
+  /**
+   * Re-index a single session summary row from SQLite after in-place content edits.
+   */
+  async resyncSummaryById(db: SessionStore, summaryId: number): Promise<number> {
+    const summary = db.db.prepare(`
+      SELECT
+        ss.*,
+        COALESCE(NULLIF(s.platform_source, ''), 'claude') as platform_source
+      FROM session_summaries ss
+      LEFT JOIN sdk_sessions s ON s.memory_session_id = ss.memory_session_id
+      WHERE ss.id = ?
+    `).get(summaryId) as StoredSummary | null;
+
+    if (!summary) {
+      return 0;
+    }
+
+    const documents = this.formatSummaryDocs(summary);
+    return this.addDocuments(documents);
+  }
+
   async syncObservation(
     observationId: number,
     memorySessionId: string,

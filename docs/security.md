@@ -5,3 +5,9 @@ Server beta defaults to API-key auth. `CLAUDE_MEM_AUTH_MODE=local-dev` only enab
 API keys are generated with the `cmem_` prefix and displayed once. Claude-Mem stores only a SHA-256 hash, prefix metadata, scopes, status, and timestamps in SQLite.
 
 BullMQ mode requires Redis or Valkey. Queue payloads are limited to work needed to resume observation processing; SQLite remains the canonical memory store. Use Redis persistence for deployable examples and avoid placing server ports on public networks without auth.
+
+## Secret redaction in stored memory
+
+Claude-Mem can mask secret-shaped content at capture time before it reaches SQLite, Chroma, or LLM observer prompts. The default mode (`CLAUDE_MEM_REDACTION=standard`) replaces API keys, tokens, emails, and similar patterns with typed `[REDACTED:...]` placeholders.
+
+For data flow, settings (`off`, `standard`, `strict`), retroactive cleanup (`doctor --scan-secrets` and `--fix`), and false-positive notes (including git SHA allowlisting), see [redaction.md](./redaction.md).
