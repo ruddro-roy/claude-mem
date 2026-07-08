@@ -24,6 +24,7 @@ import { shouldShowSummary, renderSummaryFields } from './sections/SummaryRender
 import { renderPreviouslySection, renderFooter } from './sections/FooterRenderer.js';
 import { renderAgentEmptyState } from './formatters/AgentFormatter.js';
 import { renderHumanEmptyState } from './formatters/HumanFormatter.js';
+import { applyRedaction } from '../../shared/content-redaction.js';
 
 const VERSION_MARKER_PATH = path.join(
   homedir(),
@@ -94,7 +95,7 @@ function buildContextOutput(
 
   output.push(...renderFooter(economics, config, forHuman));
 
-  return output.join('\n').trimEnd();
+  return applyRedaction(output.join('\n').trimEnd());
 }
 
 /**

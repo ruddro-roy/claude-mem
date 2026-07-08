@@ -10,6 +10,7 @@ import { USER_SETTINGS_PATH } from '../../../shared/paths.js';
 import { getProjectContext } from '../../../utils/project-name.js';
 import { normalizePlatformSource } from '../../../shared/platform-source.js';
 import { PrivacyCheckValidator } from '../validation/PrivacyCheckValidator.js';
+import { applyRedaction } from '../../../shared/content-redaction.js';
 
 interface IngestContext {
   sessionManager: SessionManager;
@@ -112,10 +113,10 @@ export async function ingestObservation(payload: ObservationPayload): Promise<In
   }
 
   const cleanedToolInput = payload.toolInput !== undefined
-    ? stripMemoryTags(JSON.stringify(payload.toolInput))
+    ? applyRedaction(stripMemoryTags(JSON.stringify(payload.toolInput)), settings)
     : '{}';
   const cleanedToolResponse = payload.toolResponse !== undefined
-    ? stripMemoryTags(JSON.stringify(payload.toolResponse))
+    ? applyRedaction(stripMemoryTags(JSON.stringify(payload.toolResponse)), settings)
     : '{}';
 
   await sessionManager.queueObservation(sessionDbId, {

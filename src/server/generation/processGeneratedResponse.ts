@@ -20,6 +20,7 @@ import {
   type PostgresPool,
 } from '../../storage/postgres/pool.js';
 import { stripTags } from '../../utils/tag-stripping.js';
+import { applyRedaction } from '../../shared/content-redaction.js';
 
 // processGeneratedResponse owns the full "we got XML from a provider →
 // persist + link + advance outbox" pipeline. Every side-effect runs inside
@@ -276,14 +277,15 @@ async function persistGeneratedObservations(
       // Defense-in-depth: even if the parser slipped a private-tagged
       // string through, scrub before persisting.
       const scrubbed = stripTags(content);
-      if (!scrubbed.stripped || scrubbed.stripped.trim().length === 0) {
+      const redactedContent = applyRedaction(scrubbed.stripped);
+      if (!redactedContent || redactedContent.trim().length === 0) {
         continue;
       }
 
       const generationKey = buildObservationGenerationKey({
         generationJobId: fresh.id,
         parsedObservationIndex: index,
-        content: scrubbed.stripped,
+        content: redactedContent,
       });
 
       const observation = await obsRepo.create({
@@ -291,7 +293,7 @@ async function persistGeneratedObservations(
         teamId: fresh.teamId,
         serverSessionId: fresh.serverSessionId,
         kind,
-        content: scrubbed.stripped,
+        content: redactedContent,
         generationKey,
         metadata: {
           ...metadata,

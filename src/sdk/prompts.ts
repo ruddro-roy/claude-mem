@@ -1,6 +1,12 @@
 
 import { logger } from '../utils/logger.js';
 import type { ModeConfig } from '../services/domain/types.js';
+import {
+  getRedactionModeFromSettings,
+  redactSecrets,
+} from '../shared/content-redaction.js';
+import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../shared/paths.js';
 
 export const SUMMARY_MODE_MARKER = 'MODE SWITCH: PROGRESS SUMMARY';
 
@@ -105,6 +111,15 @@ const OBS_PROMPT_FIELD_MAX_CHARS = 16_000;
 const OBS_PROMPT_FIELD_HEAD_RATIO = 0.6;
 const OBS_PROMPT_FIELD_TAIL_RATIO = 0.3;
 
+function redactPromptField(text: string): string {
+  const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+  const mode = getRedactionModeFromSettings(settings);
+  if (mode === 'off') {
+    return text;
+  }
+  return redactSecrets(text, { mode });
+}
+
 function truncateObservationField(value: unknown, maxChars: number = OBS_PROMPT_FIELD_MAX_CHARS): string {
   // Strings embed as-is: at this point a string is either plain tool output
   // or JSON text that failed to parse in buildObservationPrompt. Running it
@@ -117,13 +132,16 @@ function truncateObservationField(value: unknown, maxChars: number = OBS_PROMPT_
   // so the call sites (template literal output) and the length check below
   // stay well-defined.
   const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? '';
-  if (raw.length <= maxChars) return raw;
+  if (raw.length <= maxChars) {
+    return redactPromptField(raw);
+  }
   const headChars = Math.max(0, Math.floor(maxChars * OBS_PROMPT_FIELD_HEAD_RATIO));
   const tailChars = Math.max(0, Math.floor(maxChars * OBS_PROMPT_FIELD_TAIL_RATIO));
   const head = raw.slice(0, headChars);
   const tail = tailChars > 0 ? raw.slice(-tailChars) : '';
   const elidedChars = Math.max(0, raw.length - head.length - tail.length);
-  return `${head}\n... <elided chars="${elidedChars}" original_size_chars="${raw.length}" reason="oversize" /> ...\n${tail}`;
+  const truncated = `${head}\n... <elided chars="${elidedChars}" original_size_chars="${raw.length}" reason="oversize" /> ...\n${tail}`;
+  return redactPromptField(truncated);
 }
 
 export function buildObservationPrompt(obs: Observation): string {

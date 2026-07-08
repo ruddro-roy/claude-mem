@@ -18,6 +18,7 @@ import type { SessionManager } from '../SessionManager.js';
 import type { WorkerRef, StorageResult } from './types.js';
 import { broadcastObservation, broadcastSummary } from './ObservationBroadcaster.js';
 import { telemetryBuffer } from '../../telemetry/buffer.js';
+import { redactObservationFields } from '../../../shared/content-redaction.js';
 
 export async function processAgentResponse(
   text: string,
@@ -115,11 +116,12 @@ export async function processAgentResponse(
     memorySessionId: session.memorySessionId
   });
 
-  const labeledObservations = observations.map(obs => ({
+  const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+  const labeledObservations = observations.map(obs => redactObservationFields({
     ...obs,
     agent_type: session.pendingAgentType ?? null,
     agent_id: session.pendingAgentId ?? null
-  }));
+  }, settings));
 
   let result: ReturnType<typeof sessionStore.storeObservations>;
   try {
@@ -219,7 +221,7 @@ export async function processAgentResponse(
   });
 
   await syncAndBroadcastObservations(
-    observations,
+    labeledObservations,
     result,
     session,
     dbManager,

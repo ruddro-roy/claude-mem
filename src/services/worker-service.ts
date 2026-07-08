@@ -1163,6 +1163,7 @@ async function main() {
         if (dependencyHint) {
           console.log(dependencyHint);
         }
+        printRedactionStatus(health);
         printQueueStatusIfBullMq(health);
         process.exit(0);
       }
@@ -1414,6 +1415,11 @@ export interface WorkerHealthSnapshot {
   uptime?: unknown;
   workerPath?: unknown;
   dependencies?: DependencyHealthSnapshot;
+  redaction?: {
+    mode?: string;
+    total?: number;
+    byKind?: Record<string, number>;
+  };
   queue?: {
     redis?: {
       status?: string;
@@ -1460,6 +1466,18 @@ async function fetchWorkerHealth(port: number, timeoutMs: number): Promise<Worke
     // [ANTI-PATTERN IGNORED]: health probe — connection refused/timeout IS the "worker not running" answer, polled on every status check; logging would spam. null is the documented recovery value the callers branch on.
     return null;
   }
+}
+
+function printRedactionStatus(health: WorkerHealthSnapshot): void {
+  const redaction = health.redaction;
+  if (!redaction || typeof redaction.mode !== 'string') {
+    return;
+  }
+  if (typeof redaction.total === 'number') {
+    console.log(`  Redaction: ${redaction.mode} (${redaction.total} total)`);
+    return;
+  }
+  console.log(`  Redaction: ${redaction.mode}`);
 }
 
 /**

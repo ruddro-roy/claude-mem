@@ -3,6 +3,7 @@
 import { ModeManager } from '../../../../services/domain/ModeManager.js';
 import type { ModeConfig, ObservationType } from '../../../../services/domain/types.js';
 import { stripTags } from '../../../../utils/tag-stripping.js';
+import { applyRedaction } from '../../../../shared/content-redaction.js';
 import { logger } from '../../../../utils/logger.js';
 import type { PostgresAgentEvent } from '../../../../storage/postgres/agent-events.js';
 import type { ServerGenerationContext } from './types.js';
@@ -107,9 +108,10 @@ function buildEventBlock(event: PostgresAgentEvent): EventBlockResult {
 
   const stripResult = stripTags(rawPayload);
   const hadPrivate = (stripResult.counts.private ?? 0) > 0;
-  const truncatedPayload = stripResult.stripped.length > MAX_PAYLOAD_CHARS
-    ? stripResult.stripped.slice(0, MAX_PAYLOAD_CHARS) + '\n[...truncated]'
-    : stripResult.stripped;
+  const redactedPayload = applyRedaction(stripResult.stripped);
+  const truncatedPayload = redactedPayload.length > MAX_PAYLOAD_CHARS
+    ? redactedPayload.slice(0, MAX_PAYLOAD_CHARS) + '\n[...truncated]'
+    : redactedPayload;
 
   if (truncatedPayload.trim().length === 0) {
     return { body: '', hadPrivate };

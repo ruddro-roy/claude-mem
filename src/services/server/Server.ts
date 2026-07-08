@@ -13,6 +13,9 @@ import { ENV_PREFIXES, ENV_EXACT_MATCHES } from '../../supervisor/env-sanitizer.
 import { flushResponseThen } from './flushResponseThen.js';
 import { getUptimeSeconds } from '../../shared/uptime.js';
 import { snapshotDependencyHealth, type DependencyHealthSnapshot } from '../../shared/dependency-health.js';
+import { getRedactionModeFromSettings } from '../../shared/content-redaction.js';
+import { getRedactionStats } from '../../shared/redaction-stats.js';
+import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
 import { globalRateLimitStore } from '../worker/RateLimitStore.js';
 import type { ObservationQueueHealth } from '../../server/queue/queue-health-types.js';
 
@@ -219,6 +222,10 @@ export class Server {
       const dependencyHealth = this.options.getDependencyHealth
         ? this.options.getDependencyHealth()
         : snapshotDependencyHealth();
+      const redactionStats = getRedactionStats();
+      const redactionMode = getRedactionModeFromSettings({
+        CLAUDE_MEM_REDACTION: SettingsDefaultsManager.get('CLAUDE_MEM_REDACTION'),
+      });
       res.status(queueDegraded ? 503 : 200).json({
         status: queueDegraded ? 'degraded' : 'ok',
         ...(this.options.runtime ? { runtime: this.options.runtime } : {}),
@@ -234,6 +241,11 @@ export class Server {
         ai: this.options.getAiStatus(),
         dependencies: dependencyHealth,
         rateLimits: globalRateLimitStore.getMostRecentByWindow(),
+        redaction: {
+          mode: redactionMode,
+          total: redactionStats.totalRedactions,
+          byKind: redactionStats.byKind,
+        },
         ...(queueHealth ? { queue: queueHealth } : {}),
       });
     });
