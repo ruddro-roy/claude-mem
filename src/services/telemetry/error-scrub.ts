@@ -30,6 +30,12 @@
  */
 
 import os from 'os';
+import {
+  capRawInput,
+  collapseTypedRedactionTokens,
+  MAX_RAW_INPUT_CHARS,
+  redactSecrets as redactSecretsTyped,
+} from '../../shared/content-redaction.js';
 import { logger } from '../../utils/logger.js';
 
 /** Max characters kept for the redacted error message. */
@@ -54,33 +60,10 @@ export const STACK_MAX_FRAMES = 10;
  * over the whole buffer stays sub-millisecond. The bounded regexes below are a
  * second, independent layer: even within 8KB they cannot backtrack quadratically.
  */
-export const MAX_RAW_INPUT_CHARS = 8192;
+export { capRawInput, MAX_RAW_INPUT_CHARS };
 
 /** Placeholder substituted for any redacted secret / token / email. */
 export const REDACTED = '[REDACTED]';
-
-/**
- * Hard-truncates a raw input string to MAX_RAW_INPUT_CHARS BEFORE any regex is
- * allowed to run on it. Pure / never throws. Non-strings are coerced safely.
- */
-export function capRawInput(text: unknown): string {
-  try {
-    if (typeof text !== 'string') {
-      if (text === null || text === undefined) return '';
-      try {
-        text = String(text);
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        logger.warn('SYSTEM', 'error-scrub: String() coercion of non-string input failed', undefined, err);
-        return '';
-      }
-    }
-    const s = text as string;
-    return s.length > MAX_RAW_INPUT_CHARS ? s.slice(0, MAX_RAW_INPUT_CHARS) : s;
-  } catch {
-    return '';
-  }
-}
 
 /**
  * Replaces the user's home directory prefix with `~`. Done FIRST so later
@@ -162,60 +145,14 @@ export function redactUrlQueryStrings(text: string): string {
 }
 
 /**
- * Masks secret-shaped substrings: emails, OpenAI-style `sk-...` keys, PostHog
- * `phc_...` keys, JWTs, AWS access key IDs (AKIA…), long hex blobs, generic
- * high-entropy tokens, and IPv4 addresses. Each match becomes [REDACTED]. Order
- * within is least-greedy-first so a JWT isn't partially eaten by the generic
- * token rule. Pure / never throws.
+ * Masks secret-shaped substrings via the shared content-redaction module,
+ * then collapses typed tokens (`[REDACTED:email]`, …) to plain `[REDACTED]`
+ * for telemetry backward compatibility. Uses `strict` mode so the legacy
+ * high-entropy bare-token heuristic is preserved. Pure / never throws.
  */
 export function redactSecrets(text: string): string {
   if (typeof text !== 'string' || text.length === 0) return text ?? '';
-  let out = text;
-  // Emails. Quantifiers are BOUNDED ({1,64} local / {1,255} domain / {2,24}
-  // TLD) so a long run of local-part chars with no '@' (or a giant domain run)
-  // cannot drive O(n²) backtracking. The bounds exceed RFC 5321 limits
-  // (local ≤ 64, domain ≤ 255) so every real address still matches.
-  out = out.replace(/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/g, REDACTED);
-  // JWTs: three base64url segments separated by dots (header.payload.sig).
-  // Each segment is BOUNDED ({10,512}) so a long dot-free base64 run cannot
-  // backtrack quadratically chasing the required dots. Real JWT segments are
-  // far under 512 chars.
-  out = out.replace(/\b[A-Za-z0-9_-]{10,512}\.[A-Za-z0-9_-]{10,512}\.[A-Za-z0-9_-]{10,512}\b/g, REDACTED);
-  // Provider keys with known prefixes (sk-, phc_, pk-, rk_, ghp_, xoxb-, ...)
-  // followed by a run of token chars. Prefix list kept broad but anchored.
-  // Upper-bounded ({8,512}) to stay linear on adversarial runs.
-  out = out.replace(
-    /\b(?:sk|pk|rk|ak|phc|phx|ph|ghp|gho|ghs|xox[bpasr])[-_][A-Za-z0-9_-]{8,512}\b/gi,
-    REDACTED
-  );
-  // Bearer tokens: "Bearer <token>".
-  out = out.replace(/\bBearer\s+[A-Za-z0-9._-]{8,512}\b/gi, REDACTED);
-  // AWS access key IDs: AKIA/ASIA/AGPA/AIDA/AROA/ANPA/ANVA/AIPA + 16 base32.
-  out = out.replace(/\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[0-9A-Z]{16}\b/g, REDACTED);
-  // Long hex blobs (sha/uuid-without-dashes/api hashes): 24+ hex chars.
-  // Upper-bounded ({24,4096}) so an enormous hex run stays linear.
-  out = out.replace(/\b[0-9a-fA-F]{24,4096}\b/g, REDACTED);
-  // UUIDs.
-  out = out.replace(
-    /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g,
-    REDACTED
-  );
-  // Generic high-entropy tokens: 32+ chars of base64url-ish alphabet that
-  // contain at least one digit (avoids redacting ordinary long words).
-  // The "contains a digit" requirement is a lookahead that previously scanned
-  // the WHOLE run from every position → O(n²) on a long digit-free run. It is
-  // now bounded ([...]{0,4096}) and the run itself is bounded ({32,4096}) so
-  // the work per position is capped and total work stays linear in practice.
-  out = out.replace(/\b(?=[A-Za-z0-9+/_-]{0,4096}\d)[A-Za-z0-9+/_-]{32,4096}={0,2}\b/g, REDACTED);
-  // IPv4 addresses (internal IPs/hostnames leak in network errors). Each
-  // octet is constrained to 0-255 so 4-part dotted quads match but ordinary
-  // 3-part version numbers (1.2.3) do NOT. Word-boundaried both sides so a
-  // longer dotted token (e.g. a 5-part version) is left alone.
-  out = out.replace(
-    /\b(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\b/g,
-    REDACTED
-  );
-  return out;
+  return collapseTypedRedactionTokens(redactSecretsTyped(text, { mode: 'strict' }));
 }
 
 /** Collapses runs of whitespace to single spaces and trims. Pure. */
